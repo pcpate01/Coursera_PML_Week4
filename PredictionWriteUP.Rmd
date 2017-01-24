@@ -1,0 +1,204 @@
+#Assignment for Prediction Writeup -- Practical Machine Learning code
+====================================================================
+Pankaj C. Patel
+
+##1. Summary
+
+This file is the R Markdown file for the final assignment in the COurser's Practical Machine Learning class. The purpose of the exercise is to show functionality of R Markdown file, using the data provided. Using R Studio, the knitr function converts the Markdown file into htm. The analysis for the project (also used for answering the quiz question) is based on predicting exercise processes for six participants in the dataset. For the "classe" variable in the test sample and using preliminary machine learning algorithms, the predictions are submitted on GitHub for peer-evaluation. 
+
+##2. Background
+
+The text below is from the assignment details on Coursera:
+
+"Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: [http://groupware.les.inf.puc-rio.br/har]http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).""
+
+##3. Data Source
+
+The training data is available here:
+
+[Training Set]https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data is available here:
+
+[Test Set]https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+##4. Plug in the libraries
+```{R}
+library(knitr)
+library(caret)
+library(rpart)
+library(rattle)
+library(randomForest)
+library(corrplot)
+
+set.seed(123456)
+```
+
+##5. Load and clean the data
+
+```{R}
+TrainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestURL  <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+TrainFile<-"pml-traininig.csv"
+TestFile<-"pml-testing.csv"
+
+# download the datasets
+if(!file.exists(TrainFile))
+{
+    download.file(TrainURL,destfile = TrainFile)
+}
+training <- read.csv(TrainFile)
+if(!file.exists(TestFile))
+{
+    download.file(TestURL,destfile = TestFile)
+}
+testing  <- read.csv(TestFile)
+
+# Partition using caret package with the training dataset on 60,40 ratio
+inTrain  <- createDataPartition(training$classe, p=0.6, list=FALSE)
+
+TrainSet <- training[inTrain, ]
+
+TestSet  <- training[-inTrain, ]
+dim(TrainSet)
+dim(TestSet)
+
+```
+
+##6. Now drop the ID and near zero variances
+
+```{R}
+NZeroV <- nearZeroVar(TrainSet)
+TrainSet <- TrainSet[, -NZeroV]
+TestSet  <- TestSet[, -NZeroV]
+dim(TestSet)
+dim(TrainSet)
+
+```
+
+##7. Drop the missing values
+
+```{R}
+
+# remove variables that are mostly NA
+AllNA    <- sapply(TrainSet, function(x) mean(is.na(x))) > 0.95
+TrainSet <- TrainSet[, AllNA==FALSE]
+TestSet  <- TestSet[, AllNA==FALSE]
+dim(TestSet)
+dim(TrainSet)
+
+#Remove ID variables in columns 1 to 5
+TrainSet <- TrainSet[, -(1:5)]
+TestSet  <- TestSet[, -(1:5)]
+dim(TrainSet)
+
+```
+
+##8. Check correlations
+
+```{R}
+corMatrix <- cor(TrainSet[, -54])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+##9. Prediction models -- Random Forest, Decision Tree, and Boosting
+###9a. Random Forest
+
+```{R}
+# Train Random Forest: model fit for random forest
+set.seed(12345)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFitRandForest <- train(classe ~ ., data=TrainSet, method="rf",
+                          trControl=controlRF)
+modFitRandForest$finalModel
+
+# Test Random Forest: prediction on Test dataset
+predictRandForest <- predict(modFitRandForest, newdata=TestSet)
+confMatRandForest <- confusionMatrix(predictRandForest, TestSet$classe)
+confMatRandForest
+
+# plot Random Forest Matrix 
+plot(confMatRandForest$table, col = confMatRandForest$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confMatRandForest$overall['Accuracy'], 4)))
+
+
+
+```
+###9b. Decision Tree
+
+```{R}
+
+# train Decision Tree model fit
+set.seed(301)
+modFitDecTree <- rpart(classe ~ ., data=TrainSet, method="class")
+fancyRpartPlot(modFitDecTree)
+
+#Test Decision tree
+# prediction on Test dataset
+predictDecTree <- predict(modFitDecTree, newdata=TestSet, type="class")
+confMatDecTree <- confusionMatrix(predictDecTree, TestSet$classe)
+confMatDecTree
+
+# plot Decision Tree matrix results
+plot(confMatDecTree$table, col = confMatDecTree$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+                  round(confMatDecTree$overall['Accuracy'], 4)))
+
+```
+
+### 9c. Generalized Boosted Model
+
+```{R}
+# train GBM model fit
+set.seed(301)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=TrainSet, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modFitGBM$finalModel
+
+# Train GBM Test dataset
+predictGBM <- predict(modFitGBM, newdata=TestSet)
+confMatGBM <- confusionMatrix(predictGBM, TestSet$classe)
+confMatGBM
+
+# plot GBM matrix results
+plot(confMatGBM$table, col = confMatGBM$byClass, 
+     main = paste("GBM - Accuracy =", round(confMatGBM$overall['Accuracy'], 4)))
+```
+
+
+##10. Use the selected model on test data
+
+```{R}
+predictTEST <- predict(modFitRandForest, newdata=testing)
+predictTEST
+```
+
+#End of program
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
